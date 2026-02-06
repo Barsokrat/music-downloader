@@ -1,0 +1,20 @@
+# Downloaded music files
+*.mp3
+Disturbed_Radio/
+LikedSongs2025/
+Linkin Park in Abu Dhabi/
+В_тачку/
+Сова_Radio/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# macOS
+.DS_Store
+
+# Test files
+test_*.csv
+test_*.py
