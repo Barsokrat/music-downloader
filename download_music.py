@@ -168,7 +168,38 @@ def find_suitable_video(search_query, max_duration=420, max_results=5):
         print(f"   ⚠️  Ошибка поиска: {e}")
         return None
 
-def download_from_csv(csv_path, output_dir):
+def normalize_audio(input_path, output_path):
+    """
+    Нормализует громкость аудио файла с помощью FFmpeg loudnorm
+
+    Args:
+        input_path: путь к исходному файлу
+        output_path: путь для сохранения нормализованного файла
+
+    Returns:
+        True если успешно, False если ошибка
+    """
+    try:
+        # FFmpeg loudnorm filter для выравнивания громкости
+        # I=-16: target integrated loudness (стандарт для streaming)
+        # TP=-1.5: true peak limit
+        # LRA=11: loudness range
+        cmd = [
+            'ffmpeg',
+            '-i', str(input_path),
+            '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
+            '-ar', '48000',  # sample rate 48kHz
+            '-y',  # overwrite без запроса
+            str(output_path)
+        ]
+
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception as e:
+        print(f"   ⚠️  Ошибка нормализации: {e}")
+        return False
+
+def download_from_csv(csv_path, output_dir, normalize=True):
     """
     Скачивает музыку из CSV файла
 
@@ -177,6 +208,11 @@ def download_from_csv(csv_path, output_dir):
     - Песня: название песни
     - Артист: исполнитель
     - Альбом: (опционально)
+
+    Args:
+        csv_path: путь к CSV файлу
+        output_dir: директория для сохранения
+        normalize: применять ли нормализацию громкости (по умолчанию True)
     """
 
     # Создаём директорию если не существует
@@ -262,7 +298,23 @@ def download_from_csv(csv_path, output_dir):
             ]
 
             subprocess.run(cmd, check=True, capture_output=True, text=True)
-            print(f"✅ [{num}] Готово: {clean_artist} - {clean_track}\n")
+
+            # Нормализация громкости если включена
+            if normalize:
+                print(f"   🔊 Нормализация громкости...")
+                temp_path = output_path.with_suffix('.tmp.mp3')
+
+                if normalize_audio(output_path, temp_path):
+                    # Заменяем оригинальный файл нормализованным
+                    temp_path.replace(output_path)
+                    print(f"✅ [{num}] Готово (с нормализацией): {clean_artist} - {clean_track}\n")
+                else:
+                    # Если нормализация не удалась, удаляем временный файл
+                    if temp_path.exists():
+                        temp_path.unlink()
+                    print(f"✅ [{num}] Готово (без нормализации): {clean_artist} - {clean_track}\n")
+            else:
+                print(f"✅ [{num}] Готово: {clean_artist} - {clean_track}\n")
 
         except subprocess.CalledProcessError as e:
             print(f"❌ [{num}] Ошибка: {clean_artist} - {clean_track}")
@@ -281,13 +333,22 @@ def main():
     # Проверяем аргументы
     if len(sys.argv) < 2:
         print("Использование:")
-        print(f"  python3 {sys.argv[0]} <путь_к_csv> [папка_для_сохранения]")
+        print(f"  python3 {sys.argv[0]} <путь_к_csv> [папка_для_сохранения] [--no-normalize]")
         print("\nПример:")
         print(f"  python3 {sys.argv[0]} ~/Downloads/songs.csv ~/Music/MyPlaylist")
+        print(f"  python3 {sys.argv[0]} ~/Downloads/songs.csv ~/Music/MyPlaylist --no-normalize")
         print("\nCSV файл должен содержать колонки: №, Песня, Артист")
+        print("\nОпции:")
+        print("  --no-normalize  Отключить нормализацию громкости (по умолчанию включена)")
         sys.exit(1)
 
-    csv_path = sys.argv[1]
+    # Парсим флаги
+    normalize = '--no-normalize' not in sys.argv
+
+    # Убираем флаги из аргументов
+    args = [arg for arg in sys.argv[1:] if not arg.startswith('--')]
+
+    csv_path = args[0]
 
     # Проверяем существование CSV
     if not Path(csv_path).exists():
@@ -298,9 +359,9 @@ def main():
     playlist_name = extract_playlist_name(csv_path)
 
     # Папка для сохранения
-    if len(sys.argv) > 2:
+    if len(args) > 1:
         # Если указана явно
-        output_dir = sys.argv[2]
+        output_dir = args[1]
     elif playlist_name:
         # Используем название плейлиста
         safe_name = re.sub(r'[^\w\s-]', '', playlist_name).strip().replace(' ', '_')
@@ -311,10 +372,11 @@ def main():
         output_dir = str(Path(csv_path).parent / "Downloaded_Music")
 
     print(f"📂 CSV файл: {csv_path}")
-    print(f"📁 Папка для сохранения: {output_dir}\n")
+    print(f"📁 Папка для сохранения: {output_dir}")
+    print(f"🔊 Нормализация громкости: {'включена' if normalize else 'отключена'}\n")
 
     # Запускаем скачивание
-    download_from_csv(csv_path, output_dir)
+    download_from_csv(csv_path, output_dir, normalize=normalize)
 
 if __name__ == "__main__":
     main()
