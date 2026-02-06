@@ -199,7 +199,7 @@ def normalize_audio(input_path, output_path):
         print(f"   ⚠️  Ошибка нормализации: {e}")
         return False
 
-def download_from_csv(csv_path, output_dir, normalize=True):
+def download_from_csv(csv_path, output_dir, normalize=True, progress_callback=None, log_callback=None, stop_check=None):
     """
     Скачивает музыку из CSV файла
 
@@ -213,7 +213,21 @@ def download_from_csv(csv_path, output_dir, normalize=True):
         csv_path: путь к CSV файлу
         output_dir: директория для сохранения
         normalize: применять ли нормализацию громкости (по умолчанию True)
+        progress_callback: функция для обновления прогресса (current, total)
+        log_callback: функция для вывода логов
+        stop_check: функция которая возвращает True если нужно остановить
     """
+
+    def log(message):
+        """Вывод лога в консоль или через callback"""
+        if log_callback:
+            log_callback(message)
+        else:
+            print(message)
+
+    def should_stop():
+        """Проверка нужно ли остановить"""
+        return stop_check and stop_check()
 
     # Создаём директорию если не существует
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -229,10 +243,16 @@ def download_from_csv(csv_path, output_dir, normalize=True):
         reader = csv.DictReader(f)
         songs = list(reader)
 
-    print(f"📀 Найдено {len(songs)} треков для скачивания\n")
+    total_songs = len(songs)
+    log(f"📀 Найдено {total_songs} треков для скачивания\n")
 
     # Скачиваем каждый трек
-    for song in songs:
+    for idx, song in enumerate(songs, 1):
+        # Проверяем, нужно ли остановить
+        if should_stop():
+            log("\n⏸️  Скачивание остановлено пользователем")
+            break
+
         num = song.get('№', '').zfill(2)
         track_name = song['Песня']
         artist = song['Артист']
@@ -267,10 +287,12 @@ def download_from_csv(csv_path, output_dir, normalize=True):
 
         # Пропускаем если уже скачан
         if output_path.exists():
-            print(f"⏭️  [{num}] Уже скачан: {clean_artist} - {clean_track}")
+            log(f"⏭️  [{num}] Уже скачан: {clean_artist} - {clean_track}")
+            if progress_callback:
+                progress_callback(idx, total_songs)
             continue
 
-        print(f"⬇️  [{num}] Скачиваю: {clean_artist} - {clean_track}")
+        log(f"⬇️  [{num}] Скачиваю: {clean_artist} - {clean_track}")
 
         try:
             # Ищем подходящее видео (не длиннее 7 минут)
@@ -301,31 +323,39 @@ def download_from_csv(csv_path, output_dir, normalize=True):
 
             # Нормализация громкости если включена
             if normalize:
-                print(f"   🔊 Нормализация громкости...")
+                log(f"   🔊 Нормализация громкости...")
                 temp_path = output_path.with_suffix('.tmp.mp3')
 
                 if normalize_audio(output_path, temp_path):
                     # Заменяем оригинальный файл нормализованным
                     temp_path.replace(output_path)
-                    print(f"✅ [{num}] Готово (с нормализацией): {clean_artist} - {clean_track}\n")
+                    log(f"✅ [{num}] Готово (с нормализацией): {clean_artist} - {clean_track}\n")
                 else:
                     # Если нормализация не удалась, удаляем временный файл
                     if temp_path.exists():
                         temp_path.unlink()
-                    print(f"✅ [{num}] Готово (без нормализации): {clean_artist} - {clean_track}\n")
+                    log(f"✅ [{num}] Готово (без нормализации): {clean_artist} - {clean_track}\n")
             else:
-                print(f"✅ [{num}] Готово: {clean_artist} - {clean_track}\n")
+                log(f"✅ [{num}] Готово: {clean_artist} - {clean_track}\n")
+
+            # Обновляем прогресс
+            if progress_callback:
+                progress_callback(idx, total_songs)
 
         except subprocess.CalledProcessError as e:
-            print(f"❌ [{num}] Ошибка: {clean_artist} - {clean_track}")
+            log(f"❌ [{num}] Ошибка: {clean_artist} - {clean_track}")
             if e.stderr:
-                print(f"   {e.stderr}\n")
+                log(f"   {e.stderr}\n")
+            if progress_callback:
+                progress_callback(idx, total_songs)
             continue
         except Exception as e:
-            print(f"❌ [{num}] Ошибка: {e}\n")
+            log(f"❌ [{num}] Ошибка: {e}\n")
+            if progress_callback:
+                progress_callback(idx, total_songs)
             continue
 
-    print(f"\n🎵 Все треки скачаны в: {output_dir}")
+    log(f"\n🎵 Все треки скачаны в: {output_dir}")
 
 def main():
     """Главная функция"""
